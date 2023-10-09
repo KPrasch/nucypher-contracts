@@ -1,0 +1,21 @@
+name: lynx-root
+
+contracts:
+  - LynxStakingToken:
+      _totalSupplyOfTokens: @ritual_token_supply
+  - TestnetThresholdStaking
+  - ProxyAdmin
+  - TACoApplication:
+      _token: $LynxStakingToken
+      _tStaking: $TestnetThresholdStaking
+      _minimumAuthorization: @minimum_authorization
+      _minOperatorSeconds: @min_operator_seconds
+      _rewardDuration: @reward_duration
+      _deauthorizationDuration: @deauthorization_duration
+      _commitmentDurationOptions: @commitment_duration_options
+  - TransparentUpgradeableProxy:
+      _logic: $TACoApplication
+      admin_: $ProxyAdmin
+      _data: $bytes:0x
+  - MockPolygonRoot:
+      _rootApplication: $TransparentUpgradeableProxy:TACoApplication

@@ -1,0 +1,47 @@
+name: tapir
+
+scripts:
+  tapir-root:
+    - TapirStakingToken:
+        _totalSupplyOfTokens: @total_supply_of_tokens
+    - TestnetThresholdStaking
+    - ProxyAdmin
+    - TACoApplication:
+        _token: $TapirStakingToken
+        _tStaking: $TestnetThresholdStaking
+        _minimumAuthorization: @minimum_authorization
+        _minOperatorSeconds: @min_operator_seconds
+        _rewardDuration: @reward_duration
+        _deauthorizationDuration: @deauthorization_duration
+        _commitmentDurationOptions: @commitment_duration_options
+    - TransparentUpgradeableProxy:
+        _logic: $TACoApplication
+        admin_: $ProxyAdmin
+        _data: $bytes:0x
+    - MockPolygonRoot:
+        _rootApplication: $TransparentUpgradeableProxy:TACoApplication
+  tapir-child:
+    - MockPolygonChild
+    - ProxyAdmin
+    - TapirTACoChildApplication:
+        _rootApplication: $MockPolygonChild
+    - TransparentUpgradeableProxy:
+        _logic: $TapirTACoChildApplication
+        admin_: $ProxyAdmin
+        _data: $bytes:0x
+    - MockPolygonChild.setChildApplication:
+        _childApplication: $TransparentUpgradeableProxy:TapirTACoChildApplication
+    - TapirRitualToken:
+        _totalSupplyOfTokens: @ritual_token_supply
+    - Coordinator:
+        _application: $TransparentUpgradeableProxy:TapirTACoChildApplication
+        _timeout: @timeout
+        _maxDkgSize: @max_dkg_size
+        _admin: $deployer
+        _currency: $TapirRitualToken
+        _feeRatePerSecond: @fee_rate_per_second
+    - TransparentUpgradeableProxy:TapirTACoChildApplication.initialize:
+        _coordinator: $Coordinator
+    - GlobalAllowList:
+        _coordinator: $Coordinator
+        _admin: $deployer

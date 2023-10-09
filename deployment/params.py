@@ -429,3 +429,22 @@ class Deployer(Transactor):
             sep="\n"
         )
         _continue()
+
+    def run(self) -> None:
+        """Runs the deployment."""
+        deployments = []
+        for contract_name, parameters in self.constructor_parameters.parameters.items():
+            contract_container = get_contract_container(contract_name)
+            if not contract_container.deployments:
+                print(f"\nDeploying {contract_name}...")
+                instance = self.deploy(contract_container)
+                deployments.append(instance)
+                print(f"Deployed {contract_name} at {instance.address}")
+            else:
+                print(f"\n{contract_name} already deployed")
+                instance = _get_contract_instance(contract_container)
+            if contract_container.proxy:
+                instance = self.proxy(contract_container, instance)
+            deployments.append(instance)
+
+        self.finalize(deployments)

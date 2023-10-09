@@ -1,0 +1,21 @@
+domain: tapir
+
+artifacts:
+    dir: ./deployment/artifacts/
+    filename: tapir.json
+
+run:
+    - tapir-root:
+        blockchain:
+            ecosystem: ethereum
+            network: sepolia
+            id: 11155111
+        artifacts:
+            exists: abort
+    - tapir-child:
+        blockchain:
+            ecosystem: polygon
+            network: mumbai
+            id: 80001
+        artifacts:
+            exists: merge

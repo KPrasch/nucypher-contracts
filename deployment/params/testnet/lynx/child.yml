@@ -1,10 +1,4 @@
-deployment:
-  name: lynx-child
-  chain_id: 80001
-
-artifacts:
-    dir: ./deployment/artifacts/
-    filename: lynx.json
+name: lynx-child
 
 contracts:
     - MockPolygonChild
@@ -16,14 +10,14 @@ contracts:
         admin_: $ProxyAdmin
         _data: $bytes:0x
     - LynxRitualToken:
-        _totalSupplyOfTokens: 10000000000000000000000000
+        _totalSupplyOfTokens: @ritual_token_supply
     - Coordinator:
         _application: $TransparentUpgradeableProxy:LynxTACoChildApplication
-        _timeout: 3600
-        _maxDkgSize: 4
+        _timeout: @one_hour_in_seconds
+        _maxDkgSize: @max_dkg_size
         _admin: $deployer
         _currency: $LynxRitualToken
-        _feeRatePerSecond: 1
+        _feeRatePerSecond: @fee_rate_per_second
     - GlobalAllowList:
         _coordinator: $Coordinator
         _admin: $deployer

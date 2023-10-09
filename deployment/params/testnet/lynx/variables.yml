@@ -1,0 +1,5 @@
+network: lynx
+variables:
+    one_hour_in_seconds: 3600
+    ritual_token_supply: 100000000000000000000000000
+    max_dkg_size: 4

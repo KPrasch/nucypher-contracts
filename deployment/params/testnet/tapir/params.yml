@@ -1,0 +1,19 @@
+name: tapir-child
+
+parameters:
+    - tapir-child:
+        TapirRitualToken:
+            _totalSupplyOfTokens: 10000000000000000000000000
+        Coordinator:
+            _timeout: 3600
+            _maxDkgSize: 4
+            _feeRatePerSecond: 1
+    - tapir-root:
+          TapirStakingToken:
+            _totalSupplyOfTokens: 10000000000000000000000000
+          TACoApplication:
+            _minimumAuthorization:
+            _minOperatorSeconds:
+            _rewardDuration:
+            _deauthorizationDuration:
+            _commitmentDurationOptions:
