@@ -39,6 +39,30 @@ contract ThresholdSigningMultisig is
     bytes4 internal constant INVALID_SIGNATURE = 0xffffffff;
     mapping(bytes32 => bytes32) public validSignatures;
 
+    // — EIP-712 Domain & Typehashes
+    bytes32 public DOMAIN_SEPARATOR;
+    bytes32 public constant EIP712_DOMAIN_TYPEHASH = keccak256(
+        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+    );
+    bytes32 public constant TX_TYPEHASH = keccak256(
+        "Transaction(address sender,address destination,uint256 value,bytes data,uint256 nonce)"
+    );
+
+    constructor() {
+
+        // initialize EIP-712 domain separator
+        DOMAIN_SEPARATOR = keccak256(
+            abi.encode(
+                EIP712_DOMAIN_TYPEHASH,
+                keccak256(bytes("TACoMultisig")),
+                keccak256(bytes("1")),
+                block.chainid,
+                address(this)
+            )
+        );
+        _disableInitializers();
+    }
+
     /**
      * @param _signers List of signers.
      * @param _threshold Threshold number of required signings
@@ -75,25 +99,35 @@ contract ThresholdSigningMultisig is
      * @param _data Call data
      * @param _nonce Nonce
      **/
-    function getUnsignedTransactionHash(
-        address _sender,
-        address _destination,
-        uint256 _value,
-        bytes memory _data,
-        uint256 _nonce
+
+    function getUserOpHash(
+        address sender,
+        address destination,
+        uint256 value,
+        bytes memory data,
+        uint256 nonce
     ) public view returns (bytes32) {
-        return
-            keccak256(
-                abi.encodePacked(address(this), _sender, _destination, _value, _data, _nonce)
-            );
+        bytes32 structHash = keccak256(
+            abi.encode(
+                TX_TYPEHASH,
+                sender,
+                destination,
+                value,
+                keccak256(data),
+                nonce
+            )
+        );
+        return keccak256(
+            abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash)
+        );
     }
 
     /**
-     * @dev Note that address recovered from signatures must be strictly increasing
-     * @param _destination Destination address
-     * @param _value Amount of ETH to transfer
-     * @param _data Call data
-     * @param _signature The aggregated signatures for signers
+     * @dev Executes a transaction after verifying threshold EIP-712 signatures
+     * @param destination Address to call
+     * @param value ETH amount
+     * @param data Calldata
+     * @param signature Concatenated 65-byte signatures
      **/
     function execute(
         address _destination,
@@ -101,9 +135,20 @@ contract ThresholdSigningMultisig is
         bytes memory _data,
         bytes memory _signature
     ) external {
-        bytes32 _hash = getUnsignedTransactionHash(msg.sender, _destination, _value, _data, nonce);
-        require(isValidSignature(_hash, _signature) == MAGICVALUE, "Invalid Signature");
-        emit Executed(msg.sender, nonce, _destination, _value);
+
+        bytes32 hash = getUserOpHash(
+            msg.sender,
+            destination,
+            value,
+            data,
+            nonce
+        );
+        require(
+            isValidSignature(hash, signature) == MAGICVALUE,
+            "Invalid Signature"
+        );
+
+        emit Executed(msg.sender, nonce, destination, value);
         nonce++;
         (bool success, ) = _destination.call{value: _value}(_data);
         require(success, "Transaction failed");
