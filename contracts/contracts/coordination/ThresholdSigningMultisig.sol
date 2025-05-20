@@ -93,11 +93,11 @@ contract ThresholdSigningMultisig is
     /**
      * @notice Get unsigned hash for transaction parameters
      * @dev Follows ERC191 signature scheme: https://github.com/ethereum/EIPs/issues/191
-     * @param _sender Trustee who will execute the transaction
-     * @param _destination Destination address
-     * @param _value Amount of ETH to transfer
-     * @param _data Call data
-     * @param _nonce Nonce
+     * @param sender Trustee who will execute the transaction
+     * @param destination Destination address
+     * @param value Amount of ETH to transfer
+     * @param data Call data
+     * @param nonce Nonce
      **/
 
     function getUserOpHash(
@@ -130,10 +130,10 @@ contract ThresholdSigningMultisig is
      * @param signature Concatenated 65-byte signatures
      **/
     function execute(
-        address _destination,
-        uint256 _value,
-        bytes memory _data,
-        bytes memory _signature
+        address destination,
+        uint256 value,
+        bytes memory data,
+        bytes memory signature
     ) external {
 
         bytes32 hash = getUserOpHash(
@@ -150,7 +150,7 @@ contract ThresholdSigningMultisig is
 
         emit Executed(msg.sender, nonce, destination, value);
         nonce++;
-        (bool success, ) = _destination.call{value: _value}(_data);
+        (bool success, ) = destination.call{value: value}(data);
         require(success, "Transaction failed");
     }
 
