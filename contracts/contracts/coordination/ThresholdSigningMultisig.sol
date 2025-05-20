@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin-upgradeable/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts/account/utils/draft-ERC4337Utils.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "./IThresholdSigningMultisig.sol";
 
 contract ThresholdSigningMultisig is
@@ -15,6 +15,7 @@ contract ThresholdSigningMultisig is
     OwnableUpgradeable
 {
     using ECDSA for bytes32;
+    using ERC4337Utils for ERC4337Utils.PackedUserOperation;
 
     event Executed(
         address indexed sender,
@@ -39,35 +40,10 @@ contract ThresholdSigningMultisig is
     bytes4 internal constant INVALID_SIGNATURE = 0xffffffff;
     mapping(bytes32 => bytes32) public validSignatures;
 
-    // — EIP-712 Domain & Typehashes
-    bytes32 public DOMAIN_SEPARATOR;
-    bytes32 public constant EIP712_DOMAIN_TYPEHASH = keccak256(
-        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
-    );
-    bytes32 public constant TX_TYPEHASH = keccak256(
-        "Transaction(address sender,address destination,uint256 value,bytes data,uint256 nonce)"
-    );
-
     constructor() {
-
-        // initialize EIP-712 domain separator
-        DOMAIN_SEPARATOR = keccak256(
-            abi.encode(
-                EIP712_DOMAIN_TYPEHASH,
-                keccak256(bytes("TACoMultisig")),
-                keccak256(bytes("1")),
-                block.chainid,
-                address(this)
-            )
-        );
         _disableInitializers();
     }
 
-    /**
-     * @param _signers List of signers.
-     * @param _threshold Threshold number of required signings
-     * @param _initialOwner Initial owner of the contract
-     **/
     function initialize(
         address[] memory _signers,
         uint16 _threshold,
@@ -76,7 +52,9 @@ contract ThresholdSigningMultisig is
         require(owner() == address(0), "Already initialized");
         __Ownable_init(_initialOwner);
         require(
-            _signers.length <= MAX_SIGNER_COUNT && _threshold <= _signers.length && _threshold > 0,
+            _signers.length <= MAX_SIGNER_COUNT &&
+            _threshold <= _signers.length &&
+            _threshold > 0,
             "Invalid arguments"
         );
 
@@ -90,84 +68,35 @@ contract ThresholdSigningMultisig is
         threshold = _threshold;
     }
 
-    /**
-     * @notice Get unsigned hash for transaction parameters
-     * @dev Follows ERC191 signature scheme: https://github.com/ethereum/EIPs/issues/191
-     * @param sender Trustee who will execute the transaction
-     * @param destination Destination address
-     * @param value Amount of ETH to transfer
-     * @param data Call data
-     * @param nonce Nonce
-     **/
-
-    function getUserOpHash(
-        address sender,
-        address destination,
-        uint256 value,
-        bytes memory data,
-        uint256 nonce
-    ) public view returns (bytes32) {
-        bytes32 structHash = keccak256(
-            abi.encode(
-                TX_TYPEHASH,
-                sender,
-                destination,
-                value,
-                keccak256(data),
-                nonce
-            )
-        );
-        return keccak256(
-            abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash)
-        );
-    }
-
-    /**
-     * @dev Executes a transaction after verifying threshold EIP-712 signatures
-     * @param destination Address to call
-     * @param value ETH amount
-     * @param data Calldata
-     * @param signature Concatenated 65-byte signatures
-     **/
     function execute(
-        address destination,
-        uint256 value,
-        bytes memory data,
-        bytes memory signature
+        ERC4337Utils.PackedUserOperation calldata userOp
     ) external {
-
-        bytes32 hash = getUserOpHash(
-            msg.sender,
-            destination,
-            value,
-            data,
-            nonce
-        );
+        require(userOp.sender == msg.sender, "Invalid sender");
+        bytes32 userOpHash = userOp.hash(ERC4337Utils.ENTRYPOINT_V08);
         require(
-            isValidSignature(hash, signature) == MAGICVALUE,
+            isValidSignature(userOpHash, userOp.signature) == MAGICVALUE,
             "Invalid Signature"
         );
 
-        emit Executed(msg.sender, nonce, destination, value);
+        (address destination, uint256 value, bytes memory data) =
+            abi.decode(userOp.callData, (address, uint256, bytes));
+
+        emit Executed(userOp.sender, userOp.nonce, destination, value);
         nonce++;
+
         (bool success, ) = destination.call{value: value}(data);
         require(success, "Transaction failed");
     }
 
-    /**
-     * @notice Check if the signatures are valid.
-     * @param _hash Hash of the transaction
-     * @param _signature The signatures for signers
-     **/
     function isValidSignature(
         bytes32 _hash,
         bytes memory _signature
     ) public view override returns (bytes4) {
-        // split up signature bytes into array
-        require(_signature.length >= (threshold * 65), "Invalid threshold of signatures");
+        require(
+            _signature.length >= threshold * 65,
+            "Invalid threshold of signatures"
+        );
         if (validSignatures[_hash] == keccak256(_signature)) {
-            // TODO is this sufficient?
-            // - in this case the message hash was previously signed and cached
             return MAGICVALUE;
         }
 
@@ -175,11 +104,7 @@ contract ThresholdSigningMultisig is
         for (uint16 i = 0; i < threshold; i++) {
             (uint8 v, bytes32 r, bytes32 s) = signatureSplit(_signature, i);
             address recovered = ecrecover(_hash, v, r, s);
-            if (!isSigner[recovered]) {
-                return INVALID_SIGNATURE;
-            }
-            // ensure signatures are for different signers
-            if (recovered <= lastSigner) {
+            if (!isSigner[recovered] || recovered <= lastSigner) {
                 return INVALID_SIGNATURE;
             }
             lastSigner = recovered;
@@ -188,23 +113,10 @@ contract ThresholdSigningMultisig is
         return MAGICVALUE;
     }
 
-    /**
-     * @notice Splits signature bytes into `uint8 v, bytes32 r, bytes32 s`.
-     * @dev Make sure to perform a bounds check for @param pos, to avoid out of bounds access on @param signatures
-     *      The signature format is a compact form of {bytes32 r}{bytes32 s}{uint8 v}
-     *      Compact means uint8 is not padded to 32 bytes.
-     * @param pos Which signature to read.
-     *            A prior bounds check of this parameter should be performed, to avoid out of bounds access.
-     * @param signatures Concatenated {r, s, v} signatures.
-     * @return v Recovery ID or Safe signature type.
-     * @return r Output value r of the signature.
-     * @return s Output value s of the signature.
-     */
     function signatureSplit(
         bytes memory signatures,
         uint256 pos
     ) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
-        /* solhint-disable no-inline-assembly */
         /// @solidity memory-safe-assembly
         assembly {
             let signaturePos := mul(0x41, pos)
@@ -212,14 +124,8 @@ contract ThresholdSigningMultisig is
             s := mload(add(signatures, add(signaturePos, 0x40)))
             v := byte(0, mload(add(signatures, add(signaturePos, 0x60))))
         }
-        /* solhint-enable no-inline-assembly */
     }
 
-    /**
-     * @notice Allows to add a new signer
-     * @dev Transaction has to be sent by `execute` method.
-     * @param _signer Address of new signer
-     **/
     function addSigner(address _signer) public onlyOwner {
         require(signers.length < MAX_SIGNER_COUNT, "At max signers");
         require(_signer != address(0) && !isSigner[_signer], "Invalid signer");
@@ -228,11 +134,6 @@ contract ThresholdSigningMultisig is
         emit SignerAdded(_signer);
     }
 
-    /**
-     * @notice Allows to remove an signer
-     * @dev Transaction has to be sent by `execute` method.
-     * @param _signer Address of signer
-     **/
     function removeSigner(address _signer) public onlyOwner {
         require(signers.length > threshold && isSigner[_signer], "Invalid signer");
         isSigner[_signer] = false;
@@ -244,21 +145,14 @@ contract ThresholdSigningMultisig is
                 break;
             }
         }
-        require(index < signers.length && signers[index] == _signer, "Signer not found");
+        require(index < signers.length, "Signer not found");
         signers[index] = signers[signers.length - 1];
-        signers.pop(); // Remove last element
+        signers.pop();
         emit SignerRemoved(_signer);
     }
 
-    /**
-     * @notice Allows to replace an signer with a new signer.
-     * @dev Transaction has to be sent by `execute` method.
-     * @param oldSigner Address of signer to be replaced.
-     * @param newSigner Address of new signer.
-     */
     function replaceSigner(address oldSigner, address newSigner) public onlyOwner {
         require(isSigner[oldSigner] && !isSigner[newSigner], "Invalid Signer");
-
         removeSigner(oldSigner);
         addSigner(newSigner);
         emit SignerReplaced(oldSigner, newSigner);
@@ -268,26 +162,17 @@ contract ThresholdSigningMultisig is
         return signers;
     }
 
-    /**
-     * @notice Allows to change the threshold number of signatures
-     * @dev Transaction has to be sent by `execute` method
-     * @param _threshold Threshold number of required signatures
-     **/
     function changeThreshold(uint16 _threshold) public onlyOwner {
         require(_threshold <= signers.length && _threshold > 0, "Invalid threshold");
         threshold = _threshold;
         emit ThresholdChanged(_threshold);
     }
 
-    //
-    // Cached signatures (in case of cohort rotation/handover)
-    //
-
     function saveSignature(bytes32 _hash, bytes memory _signature) public {
-        // Save signature
-        require(isValidSignature(_hash, _signature) == MAGICVALUE, "Invalid Signature");
-
-        // TODO: is this sufficient?
+        require(
+            isValidSignature(_hash, _signature) == MAGICVALUE,
+            "Invalid Signature"
+        );
         validSignatures[_hash] = keccak256(_signature);
         emit SignedMessageCached(_hash);
     }
