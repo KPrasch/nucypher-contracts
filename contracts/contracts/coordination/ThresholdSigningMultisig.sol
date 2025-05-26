@@ -4,8 +4,9 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/account/utils/draft-ERC4337Utils.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
+import "@openzeppelin-upgradeable/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import "./IThresholdSigningMultisig.sol";
 
 contract ThresholdSigningMultisig is
@@ -15,7 +16,7 @@ contract ThresholdSigningMultisig is
     OwnableUpgradeable
 {
     using ECDSA for bytes32;
-    using ERC4337Utils for ERC4337Utils.PackedUserOperation;
+    using ERC4337Utils for PackedUserOperation;
 
     event Executed(
         address indexed sender,
@@ -68,25 +69,26 @@ contract ThresholdSigningMultisig is
         threshold = _threshold;
     }
 
-    function execute(
-        ERC4337Utils.PackedUserOperation calldata userOp
-    ) external {
-        require(userOp.sender == msg.sender, "Invalid sender");
-        bytes32 userOpHash = userOp.hash(ERC4337Utils.ENTRYPOINT_V08);
-        require(
-            isValidSignature(userOpHash, userOp.signature) == MAGICVALUE,
-            "Invalid Signature"
-        );
+function execute(PackedUserOperation calldata userOp) external {
+    require(userOp.sender == msg.sender, "Invalid sender");
+    bytes32 userOpHash = ERC4337Utils.hash(
+        userOp,
+        address(ERC4337Utils.ENTRYPOINT_V08)
+    );
+    require(
+        isValidSignature(userOpHash, userOp.signature) == MAGICVALUE,
+        "Invalid Signature"
+    );
 
-        (address destination, uint256 value, bytes memory data) =
-            abi.decode(userOp.callData, (address, uint256, bytes));
+    (address destination, uint256 value, bytes memory data) =
+        abi.decode(userOp.callData, (address, uint256, bytes));
 
-        emit Executed(userOp.sender, userOp.nonce, destination, value);
-        nonce++;
+    emit Executed(userOp.sender, userOp.nonce, destination, value);
+    nonce++;
 
-        (bool success, ) = destination.call{value: value}(data);
-        require(success, "Transaction failed");
-    }
+    (bool success, ) = destination.call{value: value}(data);
+    require(success, "Transaction failed");
+}
 
     function isValidSignature(
         bytes32 _hash,
